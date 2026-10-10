@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;700;900&display=swap">
-<link rel="stylesheet" href="deck.css?v=7">
+<link rel="stylesheet" href="deck.css?v=8">
 <style>
 [hidden] { display: none !important; }
 :root { color-scheme: dark; --bg: #161616; --card: #222; --line: #3A3A3A; --paper: #F4EFE6; --soft: #A9A397; --yellow: #FFD400; --red: #FF4B2B; --blue: #2F6BFF; --green: #7EE081; }
@@ -133,8 +133,8 @@ button { font-family: inherit; }
 
 <div id="cue" role="status" aria-live="assertive"><span class="ico" id="cueIco">😊</span><div><b id="cueTitle"></b><span id="cueText"></span></div></div>
 
-<script src="slides.js?v=7"></script>
-<script src="shared.js?v=7"></script>
+<script src="slides.js?v=8"></script>
+<script src="shared.js?v=8"></script>
 <script>
 (function () {
   var N = Deck.count(), code = '', cur = 0, mounts = [];
@@ -163,7 +163,7 @@ button { font-family: inherit; }
 
   /* join: talk to the computer through the internet relay (works on mobile data, any distance) */
   var codeIn = document.getElementById('codeIn'), joinErr = document.getElementById('joinErr');
-  var es = null, joined = false, joinTimer, myId = Math.random().toString(36).slice(2, 10), lastHeard = 0;
+  var es = null, joined = false, joinTimer, myId = Math.random().toString(36).slice(2, 10), lastHeard = 0, pulls = [];
   var qs = new URLSearchParams(location.search).get('code');
   if (/^\d{6}$/.test(qs || '')) codeIn.value = qs;
   function join() {
@@ -172,6 +172,7 @@ button { font-family: inherit; }
     joinErr.textContent = 'מתחבר...';
     code = c;
     if (es) es.close();
+    pulls.forEach(clearTimeout); pulls = [];
     es = Deck.listen(code, 'down', function (m) {
       lastHeard = Date.now(); setDot('on');
       if (m.type === 'state' && typeof m.slide === 'number') {
@@ -179,15 +180,25 @@ button { font-family: inherit; }
         else if (m.slide !== cur) render(m.slide);
       }
     }, function (st) {
-      if (st === 'open') {
-        // the listener is live: now say hello so the computer answers with its slide
-        Deck.send(code, 'up', { type: 'hello', id: myId }).catch(function () { if (!joined) joinErr.textContent = 'אין חיבור לאינטרנט בטלפון. בדקו ונסו שוב.'; });
-      } else if (joined) setDot('off');
+      if (st === 'open') { if (!saidHello) hello(); }
+      else if (joined) setDot('off');
     });
+    var saidHello = false;
+    function hello() {
+      saidHello = true;
+      Deck.send(code, 'up', { type: 'hello', id: myId }).then(function () {
+        // the computer got our hello. If its answer is slow to arrive (some phone networks hold
+        // back live streams), fetch it directly, and go in anyway after a few seconds.
+        [1500, 3000, 5000].forEach(function (ms) { pulls.push(setTimeout(function () { if (!joined) es.pull(20).catch(function () {}); }, ms)); });
+        pulls.push(setTimeout(function () { if (!joined) enter(0); }, 6500));
+      }).catch(function () { saidHello = false; if (!joined) joinErr.textContent = 'אין חיבור לאינטרנט בטלפון. בדקו ונסו שוב.'; });
+    }
+    // do not wait for the live stream to open: some networks never report it
+    setTimeout(function () { if (!saidHello && !joined) hello(); }, 1200);
     clearTimeout(joinTimer);
     joinTimer = setTimeout(function () {
       if (!joined) joinErr.textContent = 'המחשב לא עונה. בדקו שהאתר פתוח במחשב, שהקוד נכון ושיש בו אינטרנט, ונסו שוב.';
-    }, 10000);
+    }, 12000);
   }
   function enter(slide) {
     joined = true; clearTimeout(joinTimer); joinErr.textContent = '';
@@ -198,6 +209,8 @@ button { font-family: inherit; }
   }
   // keep the computer showing "phone connected"
   setInterval(function () { if (joined && document.visibilityState === 'visible') Deck.send(code, 'up', { type: 'ping' }).catch(function () { setDot('off'); }); }, 25000);
+  // if nothing came through the live stream for a while, check for slide changes made on the computer
+  setInterval(function () { if (joined && es && document.visibilityState === 'visible' && Date.now() - lastHeard > 20000) es.pull(15).catch(function () {}); }, 8000);
   document.getElementById('joinBtn').addEventListener('click', join);
   document.getElementById('joinForm').addEventListener('submit', function (e) { e.preventDefault(); join(); });
   if (!codeIn.value) { try { var saved = sessionStorage.getItem('oren-remote-code'); if (saved) codeIn.value = saved; } catch (e) {} }

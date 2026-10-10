@@ -42,20 +42,32 @@ window.Deck = (function () {
   }
 
   // Calls onMsg(obj) for each message; onState('open'|'error') for the link.
-  // Reconnects by itself (EventSource retries automatically).
+  // Live push (EventSource) plus pull(): a one-off fetch of recent messages, for phone networks
+  // that hold back live streams. Messages are de-duplicated by id, so both can run together.
   function listen(code, dir, onMsg, onState) {
+    var seen = {}, closed = false;
+    function deliver(d) {
+      if (!d || d.event !== 'message' || !d.message || seen[d.id]) return;
+      seen[d.id] = 1;
+      try {
+        var m = JSON.parse(d.message);
+        // ignore leftovers from long ago (10 min) but tolerate a phone clock that is a bit off
+        if (m && typeof m === 'object' && Math.abs(Date.now() - (m.t || 0)) < 600000) onMsg(m);
+      } catch (err) {}
+    }
     var es = new EventSource(RELAY + topic(code, dir) + '/sse');
     es.onopen = function () { onState && onState('open'); };
     es.onerror = function () { onState && onState('error'); };
-    es.onmessage = function (e) {
-      try {
-        var d = JSON.parse(e.data);
-        if (d.event !== 'message' || !d.message) return;
-        var m = JSON.parse(d.message);
-        if (m && typeof m === 'object' && Date.now() - (m.t || 0) < 60000) onMsg(m);
-      } catch (err) {}
+    es.onmessage = function (e) { try { deliver(JSON.parse(e.data)); } catch (err) {} };
+    return {
+      close: function () { closed = true; es.close(); },
+      pull: function (sinceSec) {
+        if (closed) return Promise.resolve(false);
+        return fetch(RELAY + topic(code, dir) + '/json?poll=1&since=' + (sinceSec || 30) + 's', { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('relay ' + r.status); return r.text(); })
+          .then(function (t) { t.split('\n').forEach(function (l) { if (l.trim()) { try { deliver(JSON.parse(l)); } catch (e) {} } }); return true; });
+      }
     };
-    return es;
   }
 
   return {
