@@ -29,6 +29,8 @@ body.full.show-bar .bar { transform: none; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--soft); }
 .dot.on { background: var(--green); }
 
+.unmute { position: fixed; z-index: 20; top: 18px; left: 50%; transform: translateX(-50%); min-height: 52px; padding: 0 1.4rem; border: 3px solid var(--ink); background: var(--yellow); color: var(--ink); font-weight: 900; font-size: 1.1rem; cursor: pointer; box-shadow: 4px 4px 0 var(--red); }
+
 /* pair overlay */
 .pair { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(22,22,22,.96); padding: 24px; overflow: auto; }
 .pair-card { display: grid; grid-template-columns: auto 1fr; gap: clamp(24px, 5vw, 56px); align-items: center; max-width: 960px; }
@@ -52,6 +54,8 @@ body.full.show-bar .bar { transform: none; }
 </head>
 <body>
 <div id="stage" aria-live="polite"></div>
+
+<button class="unmute" id="unmute" type="button" hidden>🔊 לחצו להפעלת הסאונד</button>
 
 <div class="bar" id="bar">
   <button class="nav" id="prevBtn" type="button" aria-label="השקף הקודם">›</button>
@@ -96,16 +100,30 @@ body.full.show-bar .bar { transform: none; }
     document.getElementById('prevBtn').disabled = i === 0;
     document.getElementById('nextBtn').disabled = i === N - 1;
     var v = stage.querySelector('video');
-    if (v) { v.controls = true; v.currentTime = 0; if (interacted) v.play().catch(function () {}); }
+    document.getElementById('unmute').hidden = true;
+    if (v) { v.controls = true; v.currentTime = 0; playSafe(v); }
     try { history.replaceState(null, '', '#' + (i + 1)); } catch (e) {}
     broadcast();
   }
+  // Play with sound if the browser allows it; otherwise play muted and offer a one-click unmute.
+  function playSafe(v) {
+    v.muted = false;
+    v.play().catch(function () {
+      v.muted = true;
+      v.play().catch(function () {});
+      document.getElementById('unmute').hidden = false;
+    });
+  }
   function video(action) {
     var v = stage.querySelector('video'); if (!v) return;
-    if (action === 'restart') { v.currentTime = 0; v.play().catch(function () {}); }
-    else if (action === 'play') v.play().catch(function () {});
+    if (action === 'restart') { v.currentTime = 0; playSafe(v); }
+    else if (action === 'play') playSafe(v);
     else if (action === 'pause') v.pause();
   }
+  document.getElementById('unmute').addEventListener('click', function () {
+    interacted = true; this.hidden = true;
+    var v = stage.querySelector('video'); if (v) { v.muted = false; v.play().catch(function () {}); }
+  });
   var start = parseInt((location.hash || '').slice(1), 10);
   show(isNaN(start) ? 0 : start - 1);
 
