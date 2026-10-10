@@ -1,9 +1,7 @@
 /* Shared by the presenter screen (index.html) and the phone remote (remote.html).
-   The phone and the computer talk through a free public relay (ntfy.sh) over the internet,
+   The phone and the computer talk over the internet through the campaign site's small relay server,
    so they do NOT need to be on the same network: mobile data on the phone works. */
 window.Deck = (function () {
-  var RELAY = 'https://ntfy.sh/';
-  var PREFIX = 'oren-lamoatza-shalat-';
 
   function slideEl(i) {
     var wrap = document.createElement('div');
@@ -32,41 +30,53 @@ window.Deck = (function () {
   }
 
   /* ---- relay: two one-way channels per code ---- */
-  // "up" = phone -> screen, "down" = screen -> phone
-  function topic(code, dir) { return PREFIX + code + '-' + dir; }
+  // "up" = phone -> screen, "down" = screen -> phone.
+  // Messages go through the campaign site's own small server (no daily limits from a public service).
+  var RELAY = 'https://oren-lamoatza.vercel.app/api/relay';
+  function url(code, dir) { return RELAY + '?code=' + code + '&dir=' + dir; }
 
   function send(code, dir, msg) {
     msg.t = Date.now();
-    return fetch(RELAY + topic(code, dir), { method: 'POST', body: JSON.stringify(msg) })
+    // plain-text body keeps this a "simple" request, so the browser sends it straight away
+    return fetch(url(code, dir), { method: 'POST', body: JSON.stringify(msg) })
       .then(function (r) { if (!r.ok) throw new Error('relay ' + r.status); return true; });
   }
 
-  // Calls onMsg(obj) for each message; onState('open'|'error') for the link.
-  // Live push (EventSource) plus pull(): a one-off fetch of recent messages, for phone networks
-  // that hold back live streams. Messages are de-duplicated by id, so both can run together.
+  // Calls onMsg(obj) for each new message; onState('open'|'error') for the link.
+  // Checks for new messages several times a second while active, slower when nothing happens.
   function listen(code, dir, onMsg, onState) {
-    var seen = {}, closed = false;
-    function deliver(d) {
-      if (!d || d.event !== 'message' || !d.message || seen[d.id]) return;
-      seen[d.id] = 1;
-      try {
-        var m = JSON.parse(d.message);
-        // ignore leftovers from long ago (10 min) but tolerate a phone clock that is a bit off
-        if (m && typeof m === 'object' && Math.abs(Date.now() - (m.t || 0)) < 600000) onMsg(m);
-      } catch (err) {}
+    var after = -1, closed = false, timer = null, busy = false, lastMsg = Date.now(), state = '';
+    function setState(s) { if (s !== state) { state = s; onState && onState(s); } }
+    function delay() {
+      if (document.visibilityState !== 'visible') return 4000;
+      var idle = Date.now() - lastMsg;
+      return idle < 120000 ? 450 : idle < 600000 ? 1500 : 4000;
     }
-    var es = new EventSource(RELAY + topic(code, dir) + '/sse');
-    es.onopen = function () { onState && onState('open'); };
-    es.onerror = function () { onState && onState('error'); };
-    es.onmessage = function (e) { try { deliver(JSON.parse(e.data)); } catch (err) {} };
+    function schedule(ms) { clearTimeout(timer); if (!closed) timer = setTimeout(poll, ms); }
+    function poll() {
+      if (closed || busy) return Promise.resolve(false);
+      busy = true;
+      return fetch(url(code, dir) + '&after=' + after, { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('relay ' + r.status); return r.json(); })
+        .then(function (d) {
+          busy = false;
+          var first = after < 0;
+          after = d.seq;
+          setState('open');
+          if (!first) (d.msgs || []).forEach(function (x) {
+            lastMsg = Date.now();
+            if (x && x.m && typeof x.m === 'object') { try { onMsg(x.m); } catch (e) {} }
+          });
+          schedule(delay());
+          return true;
+        })
+        .catch(function () { busy = false; setState('error'); schedule(2000); return false; });
+    }
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { lastMsg = Date.now(); schedule(0); } });
+    poll();
     return {
-      close: function () { closed = true; es.close(); },
-      pull: function (sinceSec) {
-        if (closed) return Promise.resolve(false);
-        return fetch(RELAY + topic(code, dir) + '/json?poll=1&since=' + (sinceSec || 30) + 's', { cache: 'no-store' })
-          .then(function (r) { if (!r.ok) throw new Error('relay ' + r.status); return r.text(); })
-          .then(function (t) { t.split('\n').forEach(function (l) { if (l.trim()) { try { deliver(JSON.parse(l)); } catch (e) {} } }); return true; });
-      }
+      close: function () { closed = true; clearTimeout(timer); },
+      pull: function () { lastMsg = Date.now(); return poll(); }
     };
   }
 
