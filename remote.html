@@ -132,7 +132,6 @@ button { font-family: inherit; }
 
 <div id="cue" role="status" aria-live="assertive"><span class="ico" id="cueIco">😊</span><div><b id="cueTitle"></b><span id="cueText"></span></div></div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="slides.js"></script>
 <script src="shared.js"></script>
 <script>
@@ -161,49 +160,43 @@ button { font-family: inherit; }
     ['⏸️', 'נשימה', 'עצירה קטנה. אתם שולטים בקצב.']
   ];
 
-  /* join: connect straight to the computer (WebRTC via PeerJS) */
-  var codeIn = document.getElementById('codeIn'), joinErr = document.getElementById('joinErr'), peer = null, conn = null, joined = false, joinTimer;
+  /* join: talk to the computer through the internet relay (works on mobile data, any distance) */
+  var codeIn = document.getElementById('codeIn'), joinErr = document.getElementById('joinErr');
+  var es = null, joined = false, joinTimer, myId = Math.random().toString(36).slice(2, 10), lastHeard = 0;
   var qs = new URLSearchParams(location.search).get('code');
   if (/^\d{6}$/.test(qs || '')) codeIn.value = qs;
   function join() {
     var c = codeIn.value.replace(/\D/g, '');
     if (c.length !== 6) { joinErr.textContent = 'הקוד צריך להיות 6 ספרות.'; return; }
-    if (!window.Peer) { joinErr.textContent = 'לא הצלחנו לטעון את רכיב החיבור. בדקו את האינטרנט ורעננו.'; return; }
     joinErr.textContent = 'מתחבר...';
     code = c;
-    if (!peer || peer.destroyed) {
-      peer = new Peer();
-      peer.on('open', connect);
-      peer.on('disconnected', function () { try { peer.reconnect(); } catch (e) {} });
-      peer.on('error', function (err) {
-        if (err.type === 'peer-unavailable') { setDot('off'); if (!joined) joinErr.textContent = 'לא מצאנו מסך עם הקוד הזה. בדקו שדף המצגת פתוח במחשב ושהקוד נכון.'; else retry(); }
-        else if (!joined) joinErr.textContent = 'אין חיבור. בדקו את האינטרנט ונסו שוב.';
-      });
-    } else if (peer.open) connect();
-  }
-  function connect() {
-    if (conn) try { conn.close(); } catch (e) {}
-    conn = peer.connect(Deck.peerId(code), { reliable: true });
-    clearTimeout(joinTimer);
-    joinTimer = setTimeout(function () { if (!conn.open && !joined) joinErr.textContent = 'החיבור לוקח זמן. אם זה לא עובד, חברו את הטלפון והמחשב לאותה רשת Wi-Fi או לנקודה חמה של הטלפון.'; }, 9000);
-    conn.on('open', function () {
-      clearTimeout(joinTimer); setDot('on');
-      if (!joined) {
-        joined = true; joinErr.textContent = '';
-        try { sessionStorage.setItem('oren-remote-code', code); } catch (e) {}
-        document.getElementById('join').hidden = true;
-        document.getElementById('app').hidden = false; document.getElementById('nav').hidden = false;
-        render(0, true); wake();
+    if (es) es.close();
+    es = Deck.listen(code, 'down', function (m) {
+      lastHeard = Date.now(); setDot('on');
+      if (m.type === 'state' && typeof m.slide === 'number') {
+        if (!joined) enter(m.slide);
+        else if (m.slide !== cur) render(m.slide);
       }
-      conn.send({ type: 'hello' });
+    }, function (st) {
+      if (st === 'open') {
+        // the listener is live: now say hello so the computer answers with its slide
+        Deck.send(code, 'up', { type: 'hello', id: myId }).catch(function () { if (!joined) joinErr.textContent = 'אין חיבור לאינטרנט בטלפון. בדקו ונסו שוב.'; });
+      } else if (joined) setDot('off');
     });
-    conn.on('data', function (m) {
-      if (m && m.type === 'state' && typeof m.slide === 'number' && m.slide !== cur) render(m.slide);
-    });
-    conn.on('close', function () { setDot('off'); retry(); });
+    clearTimeout(joinTimer);
+    joinTimer = setTimeout(function () {
+      if (!joined) joinErr.textContent = 'המחשב לא עונה. בדקו שהאתר פתוח במחשב, שהקוד נכון ושיש בו אינטרנט, ונסו שוב.';
+    }, 10000);
   }
-  var retryT;
-  function retry() { clearTimeout(retryT); retryT = setTimeout(function () { if (peer && !peer.destroyed && (!conn || !conn.open)) { if (peer.disconnected) try { peer.reconnect(); } catch (e) {} else connect(); } }, 2000); }
+  function enter(slide) {
+    joined = true; clearTimeout(joinTimer); joinErr.textContent = '';
+    try { sessionStorage.setItem('oren-remote-code', code); } catch (e) {}
+    document.getElementById('join').hidden = true;
+    document.getElementById('app').hidden = false; document.getElementById('nav').hidden = false;
+    render(slide, true); wake();
+  }
+  // keep the computer showing "phone connected"
+  setInterval(function () { if (joined && document.visibilityState === 'visible') Deck.send(code, 'up', { type: 'ping' }).catch(function () { setDot('off'); }); }, 25000);
   document.getElementById('joinBtn').addEventListener('click', join);
   document.getElementById('joinForm').addEventListener('submit', function (e) { e.preventDefault(); join(); });
   if (!codeIn.value) { try { var saved = sessionStorage.getItem('oren-remote-code'); if (saved) codeIn.value = saved; } catch (e) {} }
@@ -241,12 +234,10 @@ button { font-family: inherit; }
     if (!video) render(i);
     if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {}
     if (!timerOn && !video) toggleTimer(true);
-    if (!conn || !conn.open) { setDot('off'); retry(); return; }
-    try {
-      if (video) conn.send({ type: 'video', action: video });
-      else conn.send({ type: 'go', slide: cur });
-      setDot('on');
-    } catch (e) { setDot('off'); retry(); }
+    setDot('wait');
+    Deck.send(code, 'up', video ? { type: 'video', action: video } : { type: 'go', slide: cur })
+      .then(function () { setDot('on'); })
+      .catch(function () { setDot('off'); });
   }
   document.getElementById('nextBtn').addEventListener('click', function () { go(cur + 1); });
   document.getElementById('prevBtn').addEventListener('click', function () { go(cur - 1); });

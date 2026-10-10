@@ -79,13 +79,12 @@ body.full.show-bar .bar { transform: none; }
   </div>
 </div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="slides.js"></script>
 <script src="shared.js"></script>
 <script>
 (function () {
-  var N = Deck.count(), cur = 0, mounted, code, peer, conns = [], interacted = false;
+  var N = Deck.count(), cur = 0, mounted, code, interacted = false, broadcast = function () {};
   var stage = document.getElementById('stage');
 
   /* ---------- slides ---------- */
@@ -143,51 +142,38 @@ body.full.show-bar .bar { transform: none; }
     if (e.clientY > innerHeight - 90) { document.body.classList.add('show-bar'); clearTimeout(hideT); hideT = setTimeout(function () { document.body.classList.remove('show-bar'); }, 2500); }
   });
 
-  /* ---------- phone link (WebRTC, no server) ---------- */
-  var statusEl = document.getElementById('status');
+  /* ---------- phone link (internet relay, any network) ---------- */
+  var statusEl = document.getElementById('status'), phoneSeen = 0, es = null;
   function setStatus(t, cls) { statusEl.textContent = t; statusEl.className = 'status' + (cls ? ' ' + cls : ''); }
-  function setPhone(n) {
-    document.getElementById('dot').classList.toggle('on', n > 0);
-    document.getElementById('phoneLabel').textContent = n > 0 ? 'טלפון מחובר' : 'טלפון לא מחובר';
+  function setPhone(on) {
+    document.getElementById('dot').classList.toggle('on', on);
+    document.getElementById('phoneLabel').textContent = on ? 'טלפון מחובר' : 'טלפון לא מחובר';
   }
-  function broadcast() {
-    conns.forEach(function (c) { if (c.open) try { c.send({ type: 'state', slide: cur }); } catch (e) {} });
-  }
-  function startPeer(tries) {
-    if (!window.Peer) { setStatus('לא הצלחנו לטעון את רכיב החיבור. בדקו את האינטרנט ורעננו את הדף.', 'bad'); return; }
-    try { code = sessionStorage.getItem('oren-code'); } catch (e) {}
-    if (!/^\d{6}$/.test(code || '') || tries > 0) { code = Deck.newCode(); try { sessionStorage.setItem('oren-code', code); } catch (e) {} }
-    document.getElementById('code').textContent = code;
-    var link = new URL('remote.html', location.href).href.split('?')[0] + '?code=' + code;
-    var qr = document.getElementById('qr'); qr.textContent = '';
-    if (window.QRCode) new QRCode(qr, { text: link, width: 220, height: 220, colorDark: '#161616', colorLight: '#F4EFE6' });
-    setStatus('מכין את החיבור...');
-    peer = new Peer(Deck.peerId(code));
-    peer.on('open', function () { setStatus('מוכן. סרקו את הקוד מהטלפון.'); });
-    peer.on('connection', function (c) {
-      c.on('open', function () {
-        conns.push(c); setPhone(conns.length);
-        setStatus('הטלפון מחובר! אפשר לחזור למצגת.', 'ok');
-        c.send({ type: 'state', slide: cur });
-        setTimeout(closePair, 1200);
-      });
-      c.on('data', function (m) {
-        if (!m || typeof m !== 'object') return;
-        interacted = true;
-        if (m.type === 'go' && typeof m.slide === 'number') show(m.slide, true);
-        else if (m.type === 'video') video(m.action);
-        else if (m.type === 'hello') c.send({ type: 'state', slide: cur });
-      });
-      c.on('close', function () { conns = conns.filter(function (x) { return x !== c; }); setPhone(conns.length); });
-    });
-    peer.on('disconnected', function () { try { peer.reconnect(); } catch (e) {} });
-    peer.on('error', function (err) {
-      if (err.type === 'unavailable-id' && tries < 3) { peer.destroy(); startPeer((tries || 0) + 1); return; }
-      if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') setStatus('אין חיבור לשרת החיבורים. בדקו את האינטרנט ורעננו את הדף.', 'bad');
-    });
-  }
+  setInterval(function () { setPhone(Date.now() - phoneSeen < 45000); }, 3000);
+  broadcast = function () { if (code) Deck.send(code, 'down', { type: 'state', slide: cur }).catch(function () {}); };
+
+  try { code = sessionStorage.getItem('oren-code'); } catch (e) {}
+  if (!/^\d{6}$/.test(code || '')) { code = Deck.newCode(); try { sessionStorage.setItem('oren-code', code); } catch (e) {} }
+  document.getElementById('code').textContent = code;
+  var link = new URL('remote.html', location.href).href.split('?')[0] + '?code=' + code;
+  if (window.QRCode) new QRCode(document.getElementById('qr'), { text: link, width: 220, height: 220, colorDark: '#161616', colorLight: '#F4EFE6' });
+  setStatus('מכין את החיבור...');
+  es = Deck.listen(code, 'up', function (m) {
+    phoneSeen = Date.now(); setPhone(true); interacted = true;
+    if (m.type === 'hello') {
+      Deck.send(code, 'down', { type: 'state', slide: cur, hello: m.id }).catch(function () {});
+      setStatus('הטלפון מחובר! אפשר לחזור למצגת.', 'ok');
+      setTimeout(closePair, 1200);
+    } else if (m.type === 'go' && typeof m.slide === 'number') {
+      // the phone already shows this slide, so no echo back (saves relay requests)
+      var keep = broadcast; broadcast = function () {}; show(m.slide); broadcast = keep;
+    } else if (m.type === 'video') video(m.action);
+    else if (m.type === 'ping') {}
+  }, function (st) {
+    if (st === 'open') setStatus(phoneSeen ? 'הטלפון מחובר! אפשר לחזור למצגת.' : 'מוכן. סרקו את הקוד מהטלפון.', phoneSeen ? 'ok' : '');
+    else setStatus('אין חיבור לאינטרנט. מנסה שוב...', 'bad');
+  });
   document.getElementById('remoteUrl').textContent = location.host + '/remote.html';
-  startPeer(0);
 
   function openPair() { document.getElementById('pair').hidden = false; }
   function closePair() { document.getElementById('pair').hidden = true; }
