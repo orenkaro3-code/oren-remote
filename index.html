@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;700;900&display=swap">
-<link rel="stylesheet" href="deck.css?v=13">
+<link rel="stylesheet" href="deck.css?v=14">
 <style>
 [hidden] { display: none !important; }
 :root { color-scheme: dark; --paper: #F4EFE6; --ink: #161616; --yellow: #FFD400; --red: #FF4B2B; --blue: #2F6BFF; --green: #7EE081; --soft: #A9A397; }
@@ -86,8 +86,8 @@ body.full.show-bar .bar { transform: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="slides.js?v=13"></script>
-<script src="shared.js?v=13"></script>
+<script src="slides.js?v=14"></script>
+<script src="shared.js?v=14"></script>
 <script>
 (function () {
   var N = Deck.count(), cur = 0, bstep = 0, mounted, code, interacted = false, broadcast = function () {};
@@ -131,12 +131,12 @@ body.full.show-bar .bar { transform: none; }
   show(isNaN(start) ? 0 : start - 1);
 
   /* sound effects for the AI finale */
-  var SFX = {}; ['ai_intro', 'step1', 'step2', 'step3', 'final'].forEach(function (k) { var a = new Audio('sfx/' + k + '.mp3?v=1'); a.preload = 'auto'; SFX[k] = a; });
+  var SFX = {}; ['ai_intro', 'step1', 'step2', 'step3', 'final', 'v1', 'v2', 'v3', 'v4'].forEach(function (k) { var a = new Audio('sfx/' + k + '.mp3?v=2'); a.preload = 'auto'; a.volume = k.charAt(0) === 'v' ? 1 : 0.45; SFX[k] = a; });
   function sfx(k) { var a = SFX && SFX[k]; if (!a) return; try { a.currentTime = 0; a.play().catch(function () {}); } catch (e) {} }
   function setBuild(n) {
     var prev = bstep;
     bstep = Math.max(0, Math.min(Deck.builds(cur), n));
-    if (window.SLIDES[cur].id === 'finale' && bstep > prev) sfx(bstep >= Deck.builds(cur) ? 'final' : 'step' + bstep);
+    if (window.SLIDES[cur].id === 'finale' && bstep > prev) { sfx(bstep >= Deck.builds(cur) ? 'final' : 'step' + bstep); sfx('v' + bstep); }
     Deck.reveal(mounted && mounted.el, bstep);
     document.getElementById('nextBtn').disabled = cur === N - 1 && bstep >= Deck.builds(cur);
   }
