@@ -11,3 +11,9 @@
 .slide video { display: block; background: #161616; }
 .fit { position: relative; overflow: hidden; }
 .fit > .slide { position: absolute; top: 0; left: 0; }
+/* step-by-step reveals (data-build-in): hidden until the presenter presses "next" */
+.slide [data-build-in] { opacity: 0; transform: translateY(40px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.9,.2,1.2); }
+.slide [data-build-in^="pop"] { transform: scale(.4); }
+.slide [data-build-in^="fade"] { transform: none; }
+.slide [data-build-in].on, .showall .slide [data-build-in] { opacity: 1; transform: none; }
+.slide iframe { display: block; }

@@ -24,6 +24,15 @@ window.Deck = (function () {
     fit();
     return { el: s, fit: fit };
   }
+  // Show the first `n` step-by-step parts of a mounted slide (data-build-in="kind order").
+  function reveal(el, n) {
+    if (!el) return;
+    el.querySelectorAll('[data-build-in]').forEach(function (b) {
+      var order = parseInt((b.getAttribute('data-build-in').split(' ')[1]) || '1', 10);
+      b.classList.toggle('on', order <= n);
+    });
+  }
+  function builds(i) { return (window.SLIDES[i] && window.SLIDES[i].builds) || 0; }
   function newCode() {
     var a = new Uint32Array(1); crypto.getRandomValues(a);
     return String(100000 + (a[0] % 900000));
@@ -83,6 +92,8 @@ window.Deck = (function () {
   return {
     mount: mount,
     count: function () { return window.SLIDES.length; },
+    reveal: reveal,
+    builds: builds,
     newCode: newCode,
     send: send,
     listen: listen

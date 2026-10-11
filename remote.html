@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;700;900&display=swap">
-<link rel="stylesheet" href="deck.css?v=11">
+<link rel="stylesheet" href="deck.css?v=12">
 <style>
 [hidden] { display: none !important; }
 :root { color-scheme: dark; --bg: #161616; --card: #222; --line: #3A3A3A; --paper: #F4EFE6; --soft: #A9A397; --yellow: #FFD400; --red: #FF4B2B; --blue: #2F6BFF; --green: #7EE081; }
@@ -103,7 +103,7 @@ button { font-family: inherit; }
   <div class="notes" id="notes"></div>
 
   <div class="next" id="nextBox">
-    <div class="fit" id="nextPrev"></div>
+    <div class="fit showall" id="nextPrev"></div>
     <p>הבא<b id="nextTitle"></b></p>
   </div>
 
@@ -133,11 +133,11 @@ button { font-family: inherit; }
 
 <div id="cue" role="status" aria-live="assertive"><span class="ico" id="cueIco">😊</span><div><b id="cueTitle"></b><span id="cueText"></span></div></div>
 
-<script src="slides.js?v=11"></script>
-<script src="shared.js?v=11"></script>
+<script src="slides.js?v=12"></script>
+<script src="shared.js?v=12"></script>
 <script>
 (function () {
-  var N = Deck.count(), code = '', cur = 0, mounts = [];
+  var N = Deck.count(), code = '', cur = 0, bstep = 0, mounts = [];
 
   /* body-language coaching, one cue per slide (by slide id) */
   var COACH = {
@@ -150,7 +150,8 @@ button { font-family: inherit; }
     ideas:     ['😄', 'לחייך למישהו', 'חייכו למישהו בשורה הראשונה כשאתם מקריאים את הרשימה.'],
     promise:   ['🤝', 'לאט ובעיניים', 'לדבר לאט. כמה שניות קשר עין עם אדם אחד, ואז לעבור לאחר.'],
     video:     ['🎬', 'לזוז הצידה', 'עמדו בצד כדי לא להסתיר את הסרטון, ותסתכלו על הקהל ולא על המסך.'],
-    vote:      ['📣', 'סיום חזק', 'להצביע על כתובת האתר על המסך, להגיד את הסלוגן בקול, ולחייך. לבקש מכולם לצעוק איתכם.']
+    vote:      ['📣', 'כמעט סוף', 'להגיד את הסלוגן בקול ולחייך. בשקף הבא כל לחיצה מעלה שורה.'],
+    finale:    ['🤖', 'סיום חזק', 'כל לחיצה מעלה שורה. להגיד כל שורה בקול יחד עם הלחיצה, ובסוף לעצור ולחייך.']
   };
   var NUDGES = [
     ['👀', 'קשר עין', 'עכשיו צד שמאל של החדר.'],
@@ -177,8 +178,8 @@ button { font-family: inherit; }
     es = Deck.listen(code, 'down', function (m) {
       lastHeard = Date.now(); setDot('on');
       if (m.type === 'state' && typeof m.slide === 'number') {
-        if (!joined) enter(m.slide);
-        else if (m.slide !== cur) render(m.slide);
+        if (!joined) enter(m.slide, m.b || 0);
+        else if (m.slide !== cur || (m.b || 0) !== bstep) render(m.slide, false, m.b || 0);
       }
     }, function (st) {
       if (st === 'open') { if (!saidHello) hello(); }
@@ -201,12 +202,12 @@ button { font-family: inherit; }
       if (!joined) joinErr.textContent = 'המחשב לא עונה. בדקו שהאתר פתוח במחשב, שהקוד נכון ושיש בו אינטרנט, ונסו שוב.';
     }, 12000);
   }
-  function enter(slide) {
+  function enter(slide, b) {
     joined = true; clearTimeout(joinTimer); joinErr.textContent = '';
     try { sessionStorage.setItem('oren-remote-code', code); } catch (e) {}
     document.getElementById('join').hidden = true;
     document.getElementById('app').hidden = false; document.getElementById('nav').hidden = false;
-    render(slide, true); wake();
+    render(slide, true, b || 0); wake();
   }
   // keep the computer showing "phone connected"
   setInterval(function () { if (joined && document.visibilityState === 'visible') Deck.send(code, 'up', { type: 'ping' }).catch(function () { setDot('off'); }); }, 25000);
@@ -218,12 +219,13 @@ button { font-family: inherit; }
   if (codeIn.value) join();
 
   /* render the phone view */
-  function render(i, quiet) {
+  function render(i, quiet, b) {
     i = Math.max(0, Math.min(N - 1, i));
-    var changed = i !== cur || quiet; cur = i;
+    var changed = i !== cur || quiet; if (i !== cur) bstep = 0; if (b !== undefined) bstep = b; cur = i;
     var s = window.SLIDES[i];
     document.getElementById('count').innerHTML = (i + 1) + ' <small>/ ' + N + '</small>';
     mounts[0] = Deck.mount(document.getElementById('now'), i);
+    Deck.reveal(mounts[0].el, bstep);
     var v = mounts[0].el.querySelector('video'); if (v) v.removeAttribute('src');
     document.getElementById('notes').textContent = s.notes || 'אין הערות לשקף הזה.';
     var c = COACH[s.id];
@@ -238,8 +240,9 @@ button { font-family: inherit; }
       document.getElementById('nextTitle').textContent = window.SLIDES[i + 1].title;
     } else { nb.hidden = true; mounts[1] = null; }
     document.getElementById('prevBtn').disabled = i === 0;
-    document.getElementById('nextBtn').textContent = i === N - 1 ? 'סוף' : 'הבא';
-    document.getElementById('nextBtn').disabled = i === N - 1;
+    var moreBuilds = bstep < Deck.builds(i);
+    document.getElementById('nextBtn').textContent = moreBuilds ? 'הבא (שורה ' + (bstep + 1) + '/' + Deck.builds(i) + ')' : (i === N - 1 ? 'סוף' : 'הבא');
+    document.getElementById('nextBtn').disabled = i === N - 1 && !moreBuilds;
     if (changed && c && !quiet) cue(c[0], c[1], c[2]);
     lastNudge = Date.now();
   }
@@ -250,11 +253,15 @@ button { font-family: inherit; }
     if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {}
     if (!timerOn && !video) toggleTimer(true);
     setDot('wait');
-    Deck.send(code, 'up', video ? { type: 'video', action: video } : { type: 'go', slide: cur })
+    Deck.send(code, 'up', video ? { type: 'video', action: video } : { type: 'go', slide: cur, b: bstep })
       .then(function () { setDot('on'); })
       .catch(function () { setDot('off'); });
   }
-  document.getElementById('nextBtn').addEventListener('click', function () { go(cur + 1); });
+  function next() {
+    if (bstep < Deck.builds(cur)) { bstep++; go(cur); return; }
+    go(cur + 1);
+  }
+  document.getElementById('nextBtn').addEventListener('click', next);
   document.getElementById('prevBtn').addEventListener('click', function () { go(cur - 1); });
   document.querySelectorAll('#vid button').forEach(function (b) { b.addEventListener('click', function () { go(cur, b.dataset.v); }); });
 

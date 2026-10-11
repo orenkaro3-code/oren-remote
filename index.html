@@ -8,13 +8,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;700;900&display=swap">
-<link rel="stylesheet" href="deck.css?v=11">
+<link rel="stylesheet" href="deck.css?v=12">
 <style>
 [hidden] { display: none !important; }
 :root { color-scheme: dark; --paper: #F4EFE6; --ink: #161616; --yellow: #FFD400; --red: #FF4B2B; --blue: #2F6BFF; --green: #7EE081; --soft: #A9A397; }
 html, body { margin: 0; height: 100%; background: #000; color: var(--paper); font-family: "Rubik", Arial, sans-serif; overflow: hidden; }
 button { font-family: inherit; }
-#stage { position: fixed; inset: 0 0 64px 0; }
+#stage { position: fixed; inset: 0 0 64px 0; direction: ltr; overflow: hidden; }
+#stage > .slide { position: absolute; top: 0; left: 0; }
 body.full #stage { inset: 0; }
 
 /* control bar */
@@ -85,21 +86,21 @@ body.full.show-bar .bar { transform: none; }
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="slides.js?v=11"></script>
-<script src="shared.js?v=11"></script>
+<script src="slides.js?v=12"></script>
+<script src="shared.js?v=12"></script>
 <script>
 (function () {
-  var N = Deck.count(), cur = 0, mounted, code, interacted = false, broadcast = function () {};
+  var N = Deck.count(), cur = 0, bstep = 0, mounted, code, interacted = false, broadcast = function () {};
   var stage = document.getElementById('stage');
 
   /* ---------- slides ---------- */
   function show(i, fromPhone) {
     i = Math.max(0, Math.min(N - 1, i));
     var old = stage.querySelector('video'); if (old) old.pause();
-    cur = i; mounted = Deck.mount(stage, i);
+    cur = i; bstep = 0; mounted = Deck.mount(stage, i);
     document.getElementById('count').textContent = (i + 1) + '/' + N;
     document.getElementById('prevBtn').disabled = i === 0;
-    document.getElementById('nextBtn').disabled = i === N - 1;
+    document.getElementById('nextBtn').disabled = i === N - 1 && !Deck.builds(i);
     var v = stage.querySelector('video');
     document.getElementById('unmute').hidden = true;
     if (v) { v.controls = true; v.currentTime = 0; playSafe(v); }
@@ -128,7 +129,16 @@ body.full.show-bar .bar { transform: none; }
   var start = parseInt((location.hash || '').slice(1), 10);
   show(isNaN(start) ? 0 : start - 1);
 
-  function step(d) { interacted = true; show(cur + d); }
+  function setBuild(n) {
+    bstep = Math.max(0, Math.min(Deck.builds(cur), n));
+    Deck.reveal(mounted && mounted.el, bstep);
+    document.getElementById('nextBtn').disabled = cur === N - 1 && bstep >= Deck.builds(cur);
+  }
+  function step(d) {
+    interacted = true;
+    if (d > 0 && bstep < Deck.builds(cur)) { setBuild(bstep + 1); broadcast(); return; }
+    show(cur + d);
+  }
   document.getElementById('nextBtn').addEventListener('click', function () { step(1); });
   document.getElementById('prevBtn').addEventListener('click', function () { step(-1); });
   addEventListener('keydown', function (e) {
@@ -169,7 +179,7 @@ body.full.show-bar .bar { transform: none; }
     document.getElementById('phoneLabel').textContent = on ? 'טלפון מחובר' : 'טלפון לא מחובר';
   }
   setInterval(function () { setPhone(Date.now() - phoneSeen < 45000); }, 3000);
-  broadcast = function () { if (code) Deck.send(code, 'down', { type: 'state', slide: cur }).catch(function () {}); };
+  broadcast = function () { if (code) Deck.send(code, 'down', { type: 'state', slide: cur, b: bstep }).catch(function () {}); };
 
   try { code = sessionStorage.getItem('oren-code'); } catch (e) {}
   if (!/^\d{6}$/.test(code || '')) { code = Deck.newCode(); try { sessionStorage.setItem('oren-code', code); } catch (e) {} }
@@ -180,12 +190,15 @@ body.full.show-bar .bar { transform: none; }
   es = Deck.listen(code, 'up', function (m) {
     phoneSeen = Date.now(); setPhone(true); interacted = true;
     if (m.type === 'hello') {
-      Deck.send(code, 'down', { type: 'state', slide: cur, hello: m.id }).catch(function () {});
+      Deck.send(code, 'down', { type: 'state', slide: cur, b: bstep, hello: m.id }).catch(function () {});
       setStatus('הטלפון מחובר! אפשר לחזור למצגת.', 'ok');
       setTimeout(closePair, 1200);
     } else if (m.type === 'go' && typeof m.slide === 'number') {
       // the phone already shows this slide, so no echo back (saves relay requests)
-      var keep = broadcast; broadcast = function () {}; show(m.slide); broadcast = keep;
+      var keep = broadcast; broadcast = function () {};
+      if (m.slide !== cur) show(m.slide);
+      setBuild(m.b || 0);
+      broadcast = keep;
     } else if (m.type === 'video') video(m.action);
     else if (m.type === 'ping') {}
   }, function (st) {
