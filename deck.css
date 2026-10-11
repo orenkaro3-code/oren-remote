@@ -17,3 +17,6 @@
 .slide [data-build-in^="fade"] { transform: none; }
 .slide [data-build-in].on, .showall .slide [data-build-in] { opacity: 1; transform: none; }
 .slide iframe { display: block; }
+/* slow zoom on the finale background photo */
+@keyframes kb { from { transform: scale(1); } to { transform: scale(1.08); } }
+.slide img.kenburns { animation: kb 20s ease-out both; }
